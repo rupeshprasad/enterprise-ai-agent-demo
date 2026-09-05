@@ -60,3 +60,6 @@ logs/
 # Generated application data
 data/chat-history/*.json
 data/chat-history/*.tmp
+
+# Local requirement documents
+requirements/
