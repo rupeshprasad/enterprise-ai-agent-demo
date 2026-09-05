@@ -1,19 +1,27 @@
 using EnterpriseAgent.Api.Services;
 using EnterpriseAgent.Api.Security;
 using EnterpriseAgent.Api.Tools;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace EnterpriseAgent.Tests;
 
-public sealed class CustomerToolsTests
+public sealed class CustomerToolsTests : IDisposable
 {
-    private readonly CustomerDataRepository repository = new(
-        new TestEnvironment(),
-        NullLogger<CustomerDataRepository>.Instance);
-    private readonly AuthorizationService authorization = new(
-        NullLogger<AuthorizationService>.Instance);
+    private readonly TestDataEnvironment environment = new();
+    private readonly CustomerDataRepository repository;
+    private readonly AuthorizationService authorization;
+
+    public CustomerToolsTests()
+    {
+        repository = new CustomerDataRepository(
+            environment,
+            NullLogger<CustomerDataRepository>.Instance);
+        authorization = new AuthorizationService(
+            environment,
+            NullLogger<AuthorizationService>.Instance);
+    }
+
+    public void Dispose() => environment.Dispose();
 
     [Fact]
     public async Task GetCustomer_ReturnsFictionalCustomer()
@@ -38,17 +46,6 @@ public sealed class CustomerToolsTests
     }
 
     [Fact]
-    public async Task GetOrderEligibility_ReturnsRestricted()
-    {
-        var tool = new GetOrderEligibilityTool(repository, authorization);
-
-        var result = await tool.ExecuteAsync("demo-user", "ABC123", CancellationToken.None);
-
-        Assert.NotNull(result);
-        Assert.Contains("Restricted", result.ToString());
-    }
-
-    [Fact]
     public async Task GetVerificationStatus_RestrictedUserCannotAccessAbc123()
     {
         var tool = new GetVerificationStatusTool(repository, authorization);
@@ -57,16 +54,43 @@ public sealed class CustomerToolsTests
             tool.ExecuteAsync("restricted-user", "ABC123", CancellationToken.None));
     }
 
-    private sealed class TestEnvironment : IWebHostEnvironment
+    [Fact]
+    public async Task GetCustomer_RestrictedUserCanAccessAssignedCustomerFromDirectory()
     {
-        private static readonly string RootPath = Path.GetFullPath(
-            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        var tool = new GetCustomerTool(repository, authorization);
 
-        public string ApplicationName { get; set; } = "EnterpriseAgent.Tests";
-        public IFileProvider WebRootFileProvider { get; set; } = new NullFileProvider();
-        public string WebRootPath { get; set; } = string.Empty;
-        public string EnvironmentName { get; set; } = "Development";
-        public string ContentRootPath { get; set; } = Path.Combine(RootPath, "src", "EnterpriseAgent.Api");
-        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
+        var result = await tool.ExecuteAsync("restricted-user", "DEF456", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Contains("Global Components", result.ToString());
     }
+
+    [Fact]
+    public async Task GetVerificationStatus_AcceptsExactCustomerName()
+    {
+        var tool = new GetVerificationStatusTool(repository, authorization);
+
+        var result = await tool.ExecuteAsync("restricted-user", "Global Components", CancellationToken.None);
+
+        var verification = Assert.IsType<EnterpriseAgent.Api.Models.VerificationRecord>(result);
+        Assert.Equal("DEF456", verification.CustomerId);
+        Assert.Equal("Approved", verification.VerificationStatus);
+    }
+
+    [Fact]
+    public async Task ResolveCustomerId_DuplicateNameIsRejectedAsAmbiguous()
+    {
+        await authorization.AddCustomerAsync(
+            new EnterpriseAgent.Api.Models.AddCustomerRequest("DUP001", "Duplicate Name", "US", "Pending"),
+            CancellationToken.None);
+        await authorization.AddCustomerAsync(
+            new EnterpriseAgent.Api.Models.AddCustomerRequest("DUP002", "Duplicate Name", "US", "Approved"),
+            CancellationToken.None);
+
+        var exception = await Assert.ThrowsAsync<CustomerReferenceAmbiguousException>(() =>
+            repository.ResolveCustomerIdAsync("Duplicate Name", CancellationToken.None));
+
+        Assert.Equal(["DUP001", "DUP002"], exception.MatchingCustomerIds);
+    }
+
 }

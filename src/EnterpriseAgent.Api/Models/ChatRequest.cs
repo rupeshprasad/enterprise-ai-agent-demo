@@ -4,4 +4,5 @@ namespace EnterpriseAgent.Api.Models;
 
 public sealed record ChatRequest(
     [Required] string UserId,
-    [Required] string Message);
+    [Required] string Message,
+    DemoCapabilityMode DemoMode = DemoCapabilityMode.FullAgent);

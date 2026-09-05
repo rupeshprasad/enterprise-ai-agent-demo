@@ -1,5 +1,0 @@
-[
-  { "customerId": "ABC123", "name": "Acme Manufacturing", "country": "US", "status": "Active" },
-  { "customerId": "DEF456", "name": "Global Components", "country": "US", "status": "Active" },
-  { "customerId": "XYZ789", "name": "Northstar Electronics", "country": "CA", "status": "Suspended" }
-]

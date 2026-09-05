@@ -11,15 +11,18 @@ public sealed class GetVerificationStatusTool(
 
     public string Description => "Gets the current verification or KYC status for a specific customer.";
 
-    public Task<object?> ExecuteAsync(
+    public async Task<object?> ExecuteAsync(
         string userId,
-        string customerId,
+        string customerReference,
         CancellationToken cancellationToken)
     {
-        authorizationService.EnsureCanAccessCustomer(userId, customerId);
-        return GetAsync(customerId, cancellationToken);
-    }
+        var customerId = await repository.ResolveCustomerIdAsync(customerReference, cancellationToken);
+        if (customerId is null)
+        {
+            return null;
+        }
 
-    private async Task<object?> GetAsync(string customerId, CancellationToken cancellationToken) =>
-        await repository.GetVerificationAsync(customerId, cancellationToken);
+        authorizationService.EnsureCanAccessCustomer(userId, customerId);
+        return await repository.GetVerificationAsync(customerId, cancellationToken);
+    }
 }

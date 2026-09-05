@@ -5,8 +5,6 @@ using EnterpriseAgent.Api.Rag;
 using EnterpriseAgent.Api.Security;
 using EnterpriseAgent.Api.Services;
 using EnterpriseAgent.Api.Tools;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace EnterpriseAgent.Tests;
@@ -16,17 +14,18 @@ public sealed class AgentIntegrationTests
     [Fact]
     public async Task OrderInvestigation_CombinesCustomerToolsAndPendingPolicy()
     {
-        var environment = new TestEnvironment();
+        using var environment = new TestDataEnvironment();
         var aiClient = new DeterministicAIClient();
         var repository = new CustomerDataRepository(
             environment,
             NullLogger<CustomerDataRepository>.Instance);
-        var authorization = new AuthorizationService(NullLogger<AuthorizationService>.Instance);
+        var authorization = new AuthorizationService(
+            environment,
+            NullLogger<AuthorizationService>.Instance);
         ICustomerTool[] tools =
         [
             new GetCustomerTool(repository, authorization),
-            new GetVerificationStatusTool(repository, authorization),
-            new GetOrderEligibilityTool(repository, authorization)
+            new GetVerificationStatusTool(repository, authorization)
         ];
         var ragService = new RagService(
             new DocumentLoader(environment, NullLogger<DocumentLoader>.Instance),
@@ -47,7 +46,6 @@ public sealed class AgentIntegrationTests
 
         Assert.Contains(response.ToolCalls!, call => call.Tool == "GetCustomer" && call.Status == "Success");
         Assert.Contains(response.ToolCalls!, call => call.Tool == "GetVerificationStatus" && call.Status == "Success");
-        Assert.Contains(response.ToolCalls!, call => call.Tool == "GetOrderEligibility" && call.Status == "Success");
         Assert.Contains(response.Sources!, source => source.Section == "Pending Verification");
     }
 
@@ -73,16 +71,4 @@ public sealed class AgentIntegrationTests
                 : new[] { 0f, 1f });
     }
 
-    private sealed class TestEnvironment : IWebHostEnvironment
-    {
-        private static readonly string RootPath = Path.GetFullPath(
-            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
-
-        public string ApplicationName { get; set; } = "EnterpriseAgent.Tests";
-        public IFileProvider WebRootFileProvider { get; set; } = new NullFileProvider();
-        public string WebRootPath { get; set; } = string.Empty;
-        public string EnvironmentName { get; set; } = "Development";
-        public string ContentRootPath { get; set; } = Path.Combine(RootPath, "src", "EnterpriseAgent.Api");
-        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
-    }
 }

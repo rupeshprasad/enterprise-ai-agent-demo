@@ -65,10 +65,15 @@ public sealed class ChatController(
         try
         {
             logger.LogInformation(
-                "Chat request received. UserId={UserId}, MessageLength={MessageLength}.",
+                "Chat request received. UserId={UserId}, DemoMode={DemoMode}, MessageLength={MessageLength}.",
                 request.UserId,
+                request.DemoMode,
                 request.Message.Length);
-            var response = await agentService.SendAsync(request.UserId, request.Message, cancellationToken);
+            var response = await agentService.SendAsync(
+                request.UserId,
+                request.Message,
+                request.DemoMode,
+                cancellationToken);
             logger.LogInformation(
                 "Chat request completed. UserId={UserId}, ToolCallCount={ToolCallCount}.",
                 request.UserId,
@@ -108,6 +113,8 @@ public sealed class ChatController(
                 response.Answer,
                 DateTimeOffset.UtcNow,
                 response.ToolCalls,
-                response.Sources),
+                response.Sources,
+                response.DemoMode,
+                response.Activity),
             cancellationToken);
 }

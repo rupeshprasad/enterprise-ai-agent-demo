@@ -5,6 +5,7 @@ using EnterpriseAgent.Api.AI;
 using EnterpriseAgent.Api.Models;
 using EnterpriseAgent.Api.Rag;
 using EnterpriseAgent.Api.Security;
+using EnterpriseAgent.Api.Services;
 using EnterpriseAgent.Api.Tools;
 
 namespace EnterpriseAgent.Api.Agents;
@@ -22,6 +23,9 @@ public sealed class AgentService(
     private const string ToolSelectionInstruction = """
         You are an enterprise customer-support agent. For customer-specific questions,
         select the single most relevant approved tool. Never invent customer data.
+        Verification status is the only customer status in this demo. Treat questions such
+        as "what is the status of 004?" as verification-status questions and use
+        GetVerificationStatus, not GetCustomer.
         Use SearchPolicy for questions about internal ordering policy, rules, verification
         meaning, or what customers are allowed to do. If a general question needs neither
         policy nor a customer record, do not call a tool. Use InvestigateOrderEligibility
@@ -37,6 +41,46 @@ public sealed class AgentService(
     public async Task<ChatResponse> SendAsync(
         string userId,
         string userMessage,
+        CancellationToken cancellationToken) =>
+        await SendAsync(userId, userMessage, DemoCapabilityMode.FullAgent, cancellationToken);
+
+    public async Task<ChatResponse> SendAsync(
+        string userId,
+        string userMessage,
+        DemoCapabilityMode demoMode,
+        CancellationToken cancellationToken)
+    {
+        var capabilities = DemoCapabilities.For(demoMode);
+        logger.LogInformation(
+            "Applying demo capabilities. DemoMode={DemoMode}, RagEnabled={RagEnabled}, ReadToolsEnabled={ReadToolsEnabled}, ActionToolsEnabled={ActionToolsEnabled}.",
+            demoMode,
+            capabilities.RagEnabled,
+            capabilities.ReadToolsEnabled,
+            capabilities.ActionToolsEnabled);
+
+        ChatResponse response;
+        try
+        {
+            response = await SendCoreAsync(userId, userMessage, capabilities, cancellationToken);
+        }
+        catch (CustomerReferenceAmbiguousException exception)
+        {
+            logger.LogInformation(
+                "Customer reference was ambiguous. Reference={CustomerReference}, MatchCount={MatchCount}.",
+                exception.CustomerReference,
+                exception.MatchingCustomerIds.Count);
+            response = new ChatResponse(
+                $"The customer name '{exception.CustomerReference}' matches multiple customers ({string.Join(", ", exception.MatchingCustomerIds)}). Please use a customer ID.",
+                [],
+                []);
+        }
+        return AddActivity(response, demoMode, capabilities);
+    }
+
+    private async Task<ChatResponse> SendCoreAsync(
+        string userId,
+        string userMessage,
+        DemoCapabilities capabilities,
         CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -45,8 +89,37 @@ public sealed class AgentService(
             userMessage.Length,
             tools.Count);
 
+        if (!capabilities.RagEnabled)
+        {
+            var llmOnlyAnswer = await aiClient.SendAsync(
+                $$"""
+                You are a general-purpose assistant operating without access to private or current
+                enterprise data. Do not claim to know customer records, verification status, order
+                eligibility, internal policy, or action results. Clearly explain unavailable access
+                when the question requires it.
+
+                User: {{userMessage}}
+                """,
+                cancellationToken);
+            return new ChatResponse(llmOnlyAnswer, [], []);
+        }
+
+        if (!capabilities.ReadToolsEnabled)
+        {
+            return await SearchPolicyWithoutCustomerToolsAsync(userMessage, stopwatch, cancellationToken);
+        }
+
         if (TryReadExplicitReviewRequest(userMessage, out var reviewCustomerId))
         {
+            if (!capabilities.ActionToolsEnabled)
+            {
+                logger.LogInformation("Action request rejected because actions are disabled in the selected demo mode.");
+                return new ChatResponse(
+                    "Creating a verification review request requires Full Agent mode. This mode allows information retrieval but does not permit actions.",
+                    [],
+                    []);
+            }
+
             return await CreateReviewRequestAsync(
                 userId,
                 reviewCustomerId,
@@ -63,7 +136,10 @@ public sealed class AgentService(
                 cancellationToken);
         }
 
-        var definitions = tools.Values.Select(CreateDefinition)
+        var allowedTools = tools.Values.Where(tool =>
+            capabilities.ActionToolsEnabled ||
+            !string.Equals(tool.Name, CreateReviewRequestToolName, StringComparison.OrdinalIgnoreCase));
+        var definitions = allowedTools.Select(CreateDefinition)
             .Append(CreatePolicySearchDefinition())
             .Append(CreateInvestigateOrderDefinition())
             .ToArray();
@@ -103,7 +179,17 @@ public sealed class AgentService(
             throw new AIProviderException("Gemini requested an unknown tool.");
         }
 
-        var customerId = ReadCustomerId(selection.Arguments);
+        if (string.Equals(tool.Name, CreateReviewRequestToolName, StringComparison.OrdinalIgnoreCase) &&
+            !capabilities.ActionToolsEnabled)
+        {
+            logger.LogWarning("AI requested action tool {ToolName} while actions are disabled.", tool.Name);
+            return new ChatResponse(
+                "That action requires Full Agent mode. No action was performed.",
+                [],
+                []);
+        }
+
+        var customerId = ReadCustomerReference(selection.Arguments);
         if (string.IsNullOrWhiteSpace(customerId))
         {
             logger.LogError("Gemini tool request for {ToolName} did not contain a customerId.", tool.Name);
@@ -161,6 +247,77 @@ public sealed class AgentService(
             [new ToolCallTrace(tool.Name, new { customerId }, status, result)]);
     }
 
+    private async Task<ChatResponse> SearchPolicyWithoutCustomerToolsAsync(
+        string userMessage,
+        Stopwatch stopwatch,
+        CancellationToken cancellationToken)
+    {
+        logger.LogInformation("Searching policy with customer tools disabled.");
+        var results = await ragService.SearchAsync(userMessage, 2, cancellationToken);
+        if (results.Count == 0)
+        {
+            return new ChatResponse("The policy knowledge base is currently unavailable or empty.", [], []);
+        }
+
+        var context = string.Join(
+            "\n\n",
+            results.Select(result =>
+                $"Source: {result.Chunk.Source}\nSection: {result.Chunk.Section}\n{result.Chunk.Content}"));
+        var answer = await aiClient.SendAsync(
+            $$"""
+            Answer using only the internal policy context below. Cite the policy filename and section.
+            Customer-specific tools are disabled, so never claim to know a named customer's current
+            status or eligibility. If the question asks about a named customer, explain the applicable
+            policy and clearly state that the customer's actual status is unavailable in this mode.
+
+            User question: {{userMessage}}
+
+            Retrieved policy context:
+            {{context}}
+            """,
+            cancellationToken);
+        var sources = results.Select(result => new RagSource(
+            result.Chunk.Source,
+            result.Chunk.Section,
+            result.Chunk.Content,
+            Math.Round(result.Score, 4))).ToArray();
+        stopwatch.Stop();
+        return new ChatResponse(answer, [], sources);
+    }
+
+    private static ChatResponse AddActivity(
+        ChatResponse response,
+        DemoCapabilityMode demoMode,
+        DemoCapabilities capabilities)
+    {
+        var activity = new List<string>
+        {
+            $"Demo mode: {GetModeLabel(demoMode)}",
+            $"RAG: {(capabilities.RagEnabled ? "enabled" : "disabled")}",
+            $"Read tools: {(capabilities.ReadToolsEnabled ? "enabled" : "disabled")}",
+            $"Actions: {(capabilities.ActionToolsEnabled ? "enabled" : "disabled")}",
+            "Authorization: enforced"
+        };
+
+        activity.AddRange((response.ToolCalls ?? []).Select(call =>
+            $"{call.Tool} called: {call.Status}"));
+        activity.AddRange((response.Sources ?? [])
+            .Select(source => $"Knowledge search: {source.File} · {source.Section}")
+            .Distinct(StringComparer.OrdinalIgnoreCase));
+        activity.Add("Final response generated");
+
+        return response with { DemoMode = demoMode, Activity = activity };
+    }
+
+    private static string GetModeLabel(DemoCapabilityMode mode) => mode switch
+    {
+        DemoCapabilityMode.LlmOnly => "LLM Only",
+        DemoCapabilityMode.Rag => "LLM + RAG",
+        DemoCapabilityMode.RagAndTools => "LLM + RAG + Tools",
+        DemoCapabilityMode.FullAgent => "Full Agent",
+        _ => mode.ToString()
+    };
+
     private static AIToolDefinition CreateDefinition(ICustomerTool tool) => new(
         tool.Name,
         tool.Description,
@@ -169,13 +326,13 @@ public sealed class AgentService(
             type = "object",
             properties = new
             {
-                customerId = new
+                customerReference = new
                 {
                     type = "string",
-                    description = "The enterprise customer identifier, such as ABC123."
+                    description = "An exact customer ID or exact customer name, such as 004 or User_004."
                 }
             },
-            required = new[] { "customerId" }
+            required = new[] { "customerReference" }
         }));
 
     private static AIToolDefinition CreatePolicySearchDefinition() => new(
@@ -197,7 +354,7 @@ public sealed class AgentService(
 
     private static AIToolDefinition CreateInvestigateOrderDefinition() => new(
         InvestigateOrderToolName,
-        "Investigates whether or why a specific customer can place an order using current customer, verification, eligibility, and policy data.",
+        "Investigates whether or why a specific customer can place an order using current customer, verification, and policy data.",
         CreateCustomerIdSchema());
 
     private static JsonElement CreateCustomerIdSchema() => JsonSerializer.SerializeToElement(new
@@ -205,13 +362,13 @@ public sealed class AgentService(
         type = "object",
         properties = new
         {
-            customerId = new
+            customerReference = new
             {
                 type = "string",
-                description = "The enterprise customer identifier, such as ABC123."
+                description = "An exact customer ID or exact customer name, such as 004 or User_004."
             }
         },
-        required = new[] { "customerId" }
+        required = new[] { "customerReference" }
     });
 
     private async Task<ChatResponse> SearchPolicyAsync(
@@ -271,14 +428,14 @@ public sealed class AgentService(
         Stopwatch stopwatch,
         CancellationToken cancellationToken)
     {
-        var customerId = ReadCustomerId(selection.Arguments);
+        var customerId = ReadCustomerReference(selection.Arguments);
         if (string.IsNullOrWhiteSpace(customerId))
         {
             logger.LogError("Order investigation request did not contain a customerId.");
             throw new AIProviderException("Gemini returned a malformed order investigation request.");
         }
 
-        var toolNames = new[] { "GetCustomer", "GetVerificationStatus", "GetOrderEligibility" };
+        var toolNames = new[] { "GetCustomer", "GetVerificationStatus" };
         var traces = new List<ToolCallTrace>(toolNames.Length);
         var toolResults = new Dictionary<string, object?>();
         foreach (var toolName in toolNames)
@@ -339,11 +496,10 @@ public sealed class AgentService(
         var structuredData = JsonSerializer.Serialize(toolResults);
         var answer = await aiClient.SendAsync(
             $$"""
-            Answer the user's customer-order question using only the approved tool results
-            and retrieved policy below. Explain the current customer status and the applicable
-            policy. The retrieved policy is authoritative for current ordering permission
-            and limits; if an eligibility-system status conflicts with a newer policy, clearly
-            explain that discrepancy. Cite the policy filename and section. Never invent missing facts.
+            Determine the customer's current ordering eligibility using only the approved customer
+            and verification results plus the retrieved policy below. Explain the verification status
+            and the applicable policy. The retrieved policy is authoritative for current ordering
+            permission and limits. Cite the policy filename and section. Never invent missing facts.
 
             User question: {{userMessage}}
             Customer tool results: {{structuredData}}
@@ -417,7 +573,7 @@ public sealed class AgentService(
             request.RequestId,
             stopwatch.ElapsedMilliseconds);
         return new ChatResponse(
-            $"Verification review request {request.RequestId} has been created for customer {customerId}.",
+            $"Verification review request {request.RequestId} has been created for customer {request.CustomerId}.",
             [trace]);
     }
 
@@ -462,7 +618,7 @@ public sealed class AgentService(
             customerId,
             stopwatch.ElapsedMilliseconds);
         return new ChatResponse(
-            $"Customer {customerId}'s verification status is {verification.VerificationStatus} (last updated {verification.LastUpdated:yyyy-MM-dd}).",
+            $"Customer {verification.CustomerId}'s verification status is {verification.VerificationStatus}.",
             [trace]);
     }
 
@@ -475,32 +631,41 @@ public sealed class AgentService(
             return false;
         }
 
-        var match = Regex.Match(message, @"\b[A-Za-z]{3}\d{3}\b");
-        if (!match.Success)
+        var customerReference = ReadCustomerReferenceFromMessage(message);
+        if (string.IsNullOrWhiteSpace(customerReference))
         {
             return false;
         }
 
-        customerId = match.Value.ToUpperInvariant();
+        customerId = customerReference;
         return true;
     }
 
     private static bool TryReadVerificationStatusRequest(string message, out string customerId)
     {
         customerId = string.Empty;
-        if (!message.Contains("verification status", StringComparison.OrdinalIgnoreCase))
+        if (!message.Contains("status", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
-        var match = Regex.Match(message, @"\b[A-Za-z]{3}\d{3}\b");
-        if (!match.Success)
+        var customerReference = ReadCustomerReferenceFromMessage(message);
+        if (string.IsNullOrWhiteSpace(customerReference))
         {
             return false;
         }
 
-        customerId = match.Value.ToUpperInvariant();
+        customerId = customerReference;
         return true;
+    }
+
+    private static string? ReadCustomerReferenceFromMessage(string message)
+    {
+        var match = Regex.Match(
+            message,
+            @"(?:status\s+(?:of|for)|request\s+for|customer)\s+(?<reference>[A-Za-z0-9][A-Za-z0-9 _-]*?)\s*[?.!]*$",
+            RegexOptions.IgnoreCase);
+        return match.Success ? match.Groups["reference"].Value.Trim() : null;
     }
 
     private static ChatResponse CreateAccessDeniedResponse(string toolName, string customerId) =>
@@ -509,8 +674,9 @@ public sealed class AgentService(
             [new ToolCallTrace(toolName, new { customerId }, "AccessDenied", null)],
             []);
 
-    private static string? ReadCustomerId(JsonElement arguments)
-        => ReadStringArgument(arguments, "customerId");
+    private static string? ReadCustomerReference(JsonElement arguments) =>
+        ReadStringArgument(arguments, "customerReference") ??
+        ReadStringArgument(arguments, "customerId");
 
     private static string? ReadStringArgument(JsonElement arguments, string argumentName)
     {

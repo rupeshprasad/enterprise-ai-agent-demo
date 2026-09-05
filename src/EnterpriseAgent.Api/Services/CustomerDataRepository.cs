@@ -16,33 +16,55 @@ public sealed class CustomerDataRepository(
         Path.Combine(environment.ContentRootPath, "..", "..", "data"));
 
     public Task<Customer?> GetCustomerAsync(string customerId, CancellationToken cancellationToken) =>
-        FindAsync<Customer>("customers.json", customerId, item => item.CustomerId, cancellationToken);
+        FindAsync(
+            customerId,
+            data => data.CustomerMaster,
+            item => item.CustomerId,
+            cancellationToken);
 
     public Task<VerificationRecord?> GetVerificationAsync(
         string customerId,
         CancellationToken cancellationToken) =>
-        FindAsync<VerificationRecord>(
-            "verification.json",
+        FindAsync(
             customerId,
+            data => data.Verification,
             item => item.CustomerId,
             cancellationToken);
 
-    public Task<OrderEligibility?> GetOrderEligibilityAsync(
-        string customerId,
-        CancellationToken cancellationToken) =>
-        FindAsync<OrderEligibility>(
-            "order-eligibility.json",
-            customerId,
-            item => item.CustomerId,
-            cancellationToken);
+    public async Task<string?> ResolveCustomerIdAsync(
+        string customerReference,
+        CancellationToken cancellationToken)
+    {
+        var filePath = Path.Combine(dataPath, "enterprise-data.json");
+        var json = await File.ReadAllTextAsync(filePath, cancellationToken);
+        var data = JsonSerializer.Deserialize<EnterpriseData>(json, JsonOptions)
+            ?? throw new JsonException("Enterprise data is empty.");
+        var exactId = data.CustomerMaster.FirstOrDefault(customer =>
+            string.Equals(customer.CustomerId, customerReference.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (exactId is not null)
+        {
+            return exactId.CustomerId;
+        }
+
+        var nameMatches = data.CustomerMaster.Where(customer =>
+            string.Equals(customer.Name, customerReference.Trim(), StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (nameMatches.Length > 1)
+        {
+            throw new CustomerReferenceAmbiguousException(
+                customerReference,
+                nameMatches.Select(customer => customer.CustomerId).ToArray());
+        }
+
+        return nameMatches.SingleOrDefault()?.CustomerId;
+    }
 
     private async Task<T?> FindAsync<T>(
-        string fileName,
         string customerId,
+        Func<EnterpriseData, IReadOnlyCollection<T>> collectionSelector,
         Func<T, string> idSelector,
         CancellationToken cancellationToken)
     {
-        var filePath = Path.Combine(dataPath, fileName);
+        var filePath = Path.Combine(dataPath, "enterprise-data.json");
         logger.LogDebug(
             "Loading {RecordType} records from {DataFile} for CustomerId={CustomerId}.",
             typeof(T).Name,
@@ -52,7 +74,9 @@ public sealed class CustomerDataRepository(
         try
         {
             var json = await File.ReadAllTextAsync(filePath, cancellationToken);
-            var records = JsonSerializer.Deserialize<T[]>(json, JsonOptions) ?? [];
+            var enterpriseData = JsonSerializer.Deserialize<EnterpriseData>(json, JsonOptions)
+                ?? throw new JsonException("Enterprise data is empty.");
+            var records = collectionSelector(enterpriseData);
             var result = records.SingleOrDefault(item =>
                 string.Equals(idSelector(item), customerId, StringComparison.OrdinalIgnoreCase));
 
@@ -62,7 +86,7 @@ public sealed class CustomerDataRepository(
                 typeof(T).Name,
                 customerId,
                 result is not null,
-                records.Length);
+                records.Count);
             return result;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
@@ -75,4 +99,13 @@ public sealed class CustomerDataRepository(
             throw;
         }
     }
+}
+
+public sealed class CustomerReferenceAmbiguousException(
+    string customerReference,
+    IReadOnlyCollection<string> matchingCustomerIds)
+    : Exception($"Customer name '{customerReference}' matches multiple customer IDs.")
+{
+    public string CustomerReference { get; } = customerReference;
+    public IReadOnlyCollection<string> MatchingCustomerIds { get; } = matchingCustomerIds;
 }

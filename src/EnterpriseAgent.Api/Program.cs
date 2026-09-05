@@ -6,6 +6,7 @@ using EnterpriseAgent.Api.Rag;
 using EnterpriseAgent.Api.Security;
 using Microsoft.OpenApi;
 using Serilog;
+using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -27,7 +28,6 @@ builder.Services.AddSingleton<AuthorizationService>();
 builder.Services.AddSingleton<VerificationReviewRequestService>();
 builder.Services.AddScoped<ICustomerTool, GetCustomerTool>();
 builder.Services.AddScoped<ICustomerTool, GetVerificationStatusTool>();
-builder.Services.AddScoped<ICustomerTool, GetOrderEligibilityTool>();
 builder.Services.AddScoped<ICustomerTool, CreateVerificationReviewRequestTool>();
 builder.Services.AddSingleton<DocumentLoader>();
 builder.Services.AddSingleton<TextChunker>();
@@ -35,7 +35,8 @@ builder.Services.AddScoped<EmbeddingService>();
 builder.Services.AddSingleton<VectorStore>();
 builder.Services.AddScoped<RagService>();
 builder.Services.AddScoped<AgentService>();
-builder.Services.AddControllers();
+builder.Services.AddControllers().AddJsonOptions(options =>
+    options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {

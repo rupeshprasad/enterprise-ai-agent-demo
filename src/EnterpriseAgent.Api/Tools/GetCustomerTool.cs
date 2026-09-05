@@ -11,15 +11,18 @@ public sealed class GetCustomerTool(
 
     public string Description => "Gets the current profile for a specific enterprise customer.";
 
-    public Task<object?> ExecuteAsync(
+    public async Task<object?> ExecuteAsync(
         string userId,
-        string customerId,
+        string customerReference,
         CancellationToken cancellationToken)
     {
-        authorizationService.EnsureCanAccessCustomer(userId, customerId);
-        return GetAsync(customerId, cancellationToken);
-    }
+        var customerId = await repository.ResolveCustomerIdAsync(customerReference, cancellationToken);
+        if (customerId is null)
+        {
+            return null;
+        }
 
-    private async Task<object?> GetAsync(string customerId, CancellationToken cancellationToken) =>
-        await repository.GetCustomerAsync(customerId, cancellationToken);
+        authorizationService.EnsureCanAccessCustomer(userId, customerId);
+        return await repository.GetCustomerAsync(customerId, cancellationToken);
+    }
 }
