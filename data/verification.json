@@ -1,0 +1,5 @@
+[
+  { "customerId": "ABC123", "verificationStatus": "Pending", "lastUpdated": "2026-08-25" },
+  { "customerId": "DEF456", "verificationStatus": "Approved", "lastUpdated": "2026-08-20" },
+  { "customerId": "XYZ789", "verificationStatus": "Rejected", "lastUpdated": "2026-08-22" }
+]

@@ -1,0 +1,17 @@
+[
+  {
+    "Name": "FE & BE",
+    "Projects": [
+      {
+        "Path": "src\\EnterpriseAgent.Web\\EnterpriseAgent.Web.esproj",
+        "Action": "Start",
+        "DebugTarget": "React (Vite)"
+      },
+      {
+        "Path": "src\\EnterpriseAgent.Api\\EnterpriseAgent.Api.csproj",
+        "Action": "Start",
+        "DebugTarget": "https"
+      }
+    ]
+  }
+]

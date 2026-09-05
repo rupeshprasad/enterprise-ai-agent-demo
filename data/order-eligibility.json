@@ -1,0 +1,5 @@
+[
+  { "customerId": "ABC123", "systemStatus": "Restricted", "reasonCode": "VERIFICATION_PENDING" },
+  { "customerId": "DEF456", "systemStatus": "Eligible", "reasonCode": null },
+  { "customerId": "XYZ789", "systemStatus": "Blocked", "reasonCode": "ACCOUNT_SUSPENDED" }
+]
