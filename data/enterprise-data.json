@@ -7,7 +7,7 @@
     },
     {
       "customerId": "002",
-      "name": "User_001",
+      "name": "User_002",
       "country": "US"
     },
     {
@@ -42,16 +42,16 @@
       "verificationStatus": "Pending"
     },
     {
-      "customerId": "002",
-      "verificationStatus": "Approved"
-    },
-    {
       "customerId": "003",
       "verificationStatus": "Rejected"
     },
     {
       "customerId": "004",
       "verificationStatus": "Pending"
+    },
+    {
+      "customerId": "002",
+      "verificationStatus": "Approved"
     }
   ]
 }

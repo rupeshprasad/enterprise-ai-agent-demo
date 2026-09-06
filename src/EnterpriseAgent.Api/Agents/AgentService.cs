@@ -19,6 +19,8 @@ public sealed class AgentService(
     private const string PolicySearchToolName = "SearchPolicy";
     private const string InvestigateOrderToolName = "InvestigateOrderEligibility";
     private const string CreateReviewRequestToolName = "CreateVerificationReviewRequest";
+    private const string OutOfScopeResponse =
+        "I can only help with authorized customer verification, ordering policy, customer eligibility, and verification review requests.";
 
     private const string ToolSelectionInstruction = """
         You are an enterprise customer-support agent. For customer-specific questions,
@@ -27,8 +29,9 @@ public sealed class AgentService(
         as "what is the status of 004?" as verification-status questions and use
         GetVerificationStatus, not GetCustomer.
         Use SearchPolicy for questions about internal ordering policy, rules, verification
-        meaning, or what customers are allowed to do. If a general question needs neither
-        policy nor a customer record, do not call a tool. Use InvestigateOrderEligibility
+        meaning, or what customers are allowed to do. Do not answer general knowledge,
+        programming, system administration, or other non-enterprise questions.
+        Use InvestigateOrderEligibility
         when the user asks whether or why a specific customer can or cannot place an order.
         Use CreateVerificationReviewRequest only when the user explicitly asks to create
         a verification review request. Never claim an action succeeded without its tool result.
@@ -88,6 +91,18 @@ public sealed class AgentService(
             "Agent orchestration started. MessageLength={MessageLength}, AvailableToolCount={AvailableToolCount}.",
             userMessage.Length,
             tools.Count);
+
+        if (!IsEnterpriseSupportQuestion(userMessage))
+        {
+            logger.LogWarning(
+                "Chat request rejected by enterprise scope guard. MessageLength={MessageLength}.",
+                userMessage.Length);
+            return new ChatResponse(
+                OutOfScopeResponse,
+                [],
+                [],
+                Activity: ["Request rejected: outside enterprise support scope"]);
+        }
 
         if (!capabilities.RagEnabled)
         {
@@ -299,6 +314,7 @@ public sealed class AgentService(
             "Authorization: enforced"
         };
 
+        activity.AddRange(response.Activity ?? []);
         activity.AddRange((response.ToolCalls ?? []).Select(call =>
             $"{call.Tool} called: {call.Status}"));
         activity.AddRange((response.Sources ?? [])
@@ -666,6 +682,19 @@ public sealed class AgentService(
             @"(?:status\s+(?:of|for)|request\s+for|customer)\s+(?<reference>[A-Za-z0-9][A-Za-z0-9 _-]*?)\s*[?.!]*$",
             RegexOptions.IgnoreCase);
         return match.Success ? match.Groups["reference"].Value.Trim() : null;
+    }
+
+    private static bool IsEnterpriseSupportQuestion(string message)
+    {
+        var containsExplicitlyUnsupportedTopic = Regex.IsMatch(
+            message,
+            @"\b(powershell|python|javascript|programming|source code|script|president|prime minister|weather|recipe|sports|quantum)\b",
+            RegexOptions.IgnoreCase);
+        var containsEnterpriseTopic = Regex.IsMatch(
+            message,
+            @"\b(customer|verification|verify|verified|kyc|order|ordering|eligib(?:le|ility)|policy|review request|access|status)\b|\buser[_-]?\d+\b",
+            RegexOptions.IgnoreCase);
+        return containsEnterpriseTopic && !containsExplicitlyUnsupportedTopic;
     }
 
     private static ChatResponse CreateAccessDeniedResponse(string toolName, string customerId) =>

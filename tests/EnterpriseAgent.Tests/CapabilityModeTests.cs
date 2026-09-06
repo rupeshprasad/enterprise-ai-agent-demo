@@ -13,6 +13,27 @@ namespace EnterpriseAgent.Tests;
 
 public sealed class CapabilityModeTests
 {
+    [Theory]
+    [InlineData(DemoCapabilityMode.LlmOnly, "Who is the President of the USA?")]
+    [InlineData(DemoCapabilityMode.Rag, "Give me PowerShell code to check whether a file exists.")]
+    [InlineData(DemoCapabilityMode.RagAndTools, "Explain quantum computing.")]
+    [InlineData(DemoCapabilityMode.FullAgent, "Write a Python program.")]
+    public async Task OutOfScopeQuestion_IsRejectedBeforeAnyAiOrEnterpriseCapability(
+        DemoCapabilityMode mode,
+        string question)
+    {
+        var fixture = CreateFixture();
+
+        var response = await fixture.Agent.SendAsync("demo-user", question, mode, CancellationToken.None);
+
+        Assert.Equal(0, fixture.Ai.SendCalls);
+        Assert.Equal(0, fixture.Ai.ToolSelectionCalls);
+        Assert.Equal(0, fixture.Ai.EmbeddingCalls);
+        Assert.All(fixture.Tools, tool => Assert.Equal(0, tool.ExecutionCount));
+        Assert.Contains("only help with authorized customer", response.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Request rejected: outside enterprise support scope", response.Activity!);
+    }
+
     [Fact]
     public async Task LlmOnly_DoesNotSearchKnowledgeOrExposeTools()
     {
@@ -153,11 +174,15 @@ public sealed class CapabilityModeTests
 
     private sealed class TrackingAIClient : IAIClient
     {
+        public int SendCalls { get; private set; }
         public int ToolSelectionCalls { get; private set; }
         public int EmbeddingCalls { get; private set; }
 
-        public Task<string> SendAsync(string prompt, CancellationToken cancellationToken = default) =>
-            Task.FromResult("A grounded test response.");
+        public Task<string> SendAsync(string prompt, CancellationToken cancellationToken = default)
+        {
+            SendCalls++;
+            return Task.FromResult("A grounded test response.");
+        }
 
         public Task<AIToolSelection?> SelectToolAsync(
             string prompt,
