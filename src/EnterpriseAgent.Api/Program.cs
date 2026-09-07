@@ -26,6 +26,7 @@ builder.Services.AddSingleton<CustomerDataRepository>();
 builder.Services.AddSingleton<ChatHistoryService>();
 builder.Services.AddSingleton<AuthorizationService>();
 builder.Services.AddSingleton<VerificationReviewRequestService>();
+builder.Services.AddSingleton<PolicyDocumentService>();
 builder.Services.AddScoped<ICustomerTool, GetCustomerTool>();
 builder.Services.AddScoped<ICustomerTool, GetVerificationStatusTool>();
 builder.Services.AddScoped<ICustomerTool, CreateVerificationReviewRequestTool>();

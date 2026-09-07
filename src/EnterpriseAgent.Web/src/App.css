@@ -140,13 +140,17 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .chat-form > small { display: block; margin-top: 8px; color: #8e8e9a; font-size: 0.67rem; text-align: center; }
 
 .modal-backdrop { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(0, 0, 0, 0.55); }
-.access-modal, .customer-modal { display: flex; flex-direction: column; width: min(700px, 100%); max-height: calc(100vh - 40px); overflow: hidden; border-radius: 18px; padding: 28px; background: #fff; box-shadow: 0 24px 70px rgba(0, 0, 0, 0.32); }
+.access-modal, .customer-modal, .policy-modal { display: flex; flex-direction: column; width: min(700px, 100%); max-height: calc(100vh - 40px); overflow: hidden; border-radius: 18px; padding: 28px; background: #fff; box-shadow: 0 24px 70px rgba(0, 0, 0, 0.32); }
+.policy-modal { width: min(900px, 100%); }
 .customer-modal { overflow-y: auto; }
 .modal-heading { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; }
 .modal-heading span { color: #08745c; font-size: 0.8rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
 .modal-heading h2 { margin: 6px 0 0; font-size: 1.45rem; }
 .modal-heading > button { border: 0; padding: 0 5px; color: #6e6e80; background: transparent; font-size: 1.6rem; line-height: 1; }
-.access-modal > p, .customer-modal > p { margin: 16px 0; color: #6e6e80; font-size: 0.95rem; line-height: 1.5; }
+.access-modal > p, .customer-modal > p, .policy-modal > p { margin: 16px 0; color: #6e6e80; font-size: 0.95rem; line-height: 1.5; }
+.policy-editor { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+.policy-editor textarea { width: 100%; min-height: 420px; resize: vertical; border: 1px solid #cfcfd7; border-radius: 10px; padding: 16px; color: #202123; background: #fafafa; font: 0.95rem/1.55 Consolas, "Courier New", monospace; }
+.policy-editor textarea:focus { border-color: #10a37f; outline: 2px solid rgba(16, 163, 127, 0.16); }
 .add-customer-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-top: 10px; border: 1px solid #d7ebe5; border-radius: 10px; padding: 12px; background: #f5fbf9; }
 .add-customer-form label { display: grid; gap: 6px; color: #555563; font-size: 0.82rem; font-weight: 700; }
 .add-customer-form label:nth-child(2) { grid-column: span 2; }
@@ -181,7 +185,8 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .done-button { border: 1px solid #202123; color: #fff; background: #202123; }
 
 @media (max-width: 560px) {
-  .access-modal, .customer-modal { padding: 20px; }
+  .access-modal, .customer-modal, .policy-modal { padding: 20px; }
+  .policy-editor textarea { min-height: 320px; }
   .add-customer-form { grid-template-columns: 1fr; }
   .add-customer-form label:nth-child(2), .add-customer-form > button { grid-column: span 1; }
 }

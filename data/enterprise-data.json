@@ -1,57 +1,67 @@
 {
-    "customerMaster": [
-        {
-            "customerId": "1",
-            "name": "Jordan",
-            "country": "US"
-        },
-        {
-            "customerId": "2",
-            "name": "Maria",
-            "country": "US"
-        },
-        {
-            "customerId": "3",
-            "name": "David",
-            "country": "CA"
-        },
-        {
-            "customerId": "4",
-            "name": "Aisha",
-            "country": "US"
-        }
-    ],
-    "customerAccess": [
-        {
-            "userId": "alex",
-            "customerIds": [
-                "1",
-                "2"
-            ]
-        },
-        {
-            "userId": "priya",
-            "customerIds": [
-                "4"
-            ]
-        }
-    ],
-    "verification": [
-        {
-            "customerId": "1",
-            "verificationStatus": "Pending"
-        },
-        {
-            "customerId": "3",
-            "verificationStatus": "Rejected"
-        },
-        {
-            "customerId": "4",
-            "verificationStatus": "Pending"
-        },
-        {
-            "customerId": "2",
-            "verificationStatus": "Approved"
-        }
-    ]
+  "customerMaster": [
+    {
+      "customerId": "1",
+      "name": "Jordan",
+      "country": "US"
+    },
+    {
+      "customerId": "2",
+      "name": "Maria",
+      "country": "US"
+    },
+    {
+      "customerId": "3",
+      "name": "David",
+      "country": "CA"
+    },
+    {
+      "customerId": "4",
+      "name": "Aisha",
+      "country": "US"
+    },
+    {
+      "customerId": "5",
+      "name": "Rupesh",
+      "country": "US"
+    }
+  ],
+  "customerAccess": [
+    {
+      "userId": "alex",
+      "customerIds": [
+        "1",
+        "2",
+        "5"
+      ]
+    },
+    {
+      "userId": "priya",
+      "customerIds": [
+        "4"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "customerId": "1",
+      "verificationStatus": "Pending"
+    },
+    {
+      "customerId": "3",
+      "verificationStatus": "Rejected"
+    },
+    {
+      "customerId": "4",
+      "verificationStatus": "Pending"
+    },
+    {
+      "customerId": "2",
+      "verificationStatus": "Approved"
+    },
+    {
+      "customerId": "5",
+      "verificationStatus": "Pending"
+    }
+  ]
 }

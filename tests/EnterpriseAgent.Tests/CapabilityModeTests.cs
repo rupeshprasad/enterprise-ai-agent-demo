@@ -79,7 +79,7 @@ public sealed class CapabilityModeTests
         Assert.Equal(1, fixture.Tools.Single(tool => tool.Name == "GetVerificationStatus").ExecutionCount);
         Assert.Equal(0, fixture.Tools.Single(tool => tool.Name == "CreateVerificationReviewRequest").ExecutionCount);
         Assert.Equal(2, investigation.ToolCalls!.Count);
-        Assert.Contains("requires Full Agent mode", rejectedAction.Answer);
+        Assert.Contains("don't have the capability to create", rejectedAction.Answer);
     }
 
     [Fact]
@@ -117,9 +117,10 @@ public sealed class CapabilityModeTests
         var fixture = CreateFixture();
 
         await fixture.Agent.SendAsync(
-            "demo-user", "Help resolve Jordan Lee so they can place an order.", DemoCapabilityMode.FullAgent, CancellationToken.None);
+            "demo-user", "Jordan is stuck, what are his options?", DemoCapabilityMode.FullAgent, CancellationToken.None);
 
         Assert.Equal(0, fixture.Tools.Single(tool => tool.Name == "CreateVerificationReviewRequest").ExecutionCount);
+        Assert.Equal(0, fixture.Ai.ToolSelectionCalls);
         Assert.Contains("Offer to create the ticket", fixture.Ai.LastSendPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("customer-service contact information", fixture.Ai.LastSendPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("bold markers", fixture.Ai.LastSendPrompt, StringComparison.OrdinalIgnoreCase);

@@ -15,6 +15,10 @@ const demoModes = [
   { value: 'RagAndTools', label: 'LLM + RAG + Tools', rag: true, readTools: true, actions: false },
   { value: 'FullAgent', label: 'Full Agent', rag: true, readTools: true, actions: true },
 ]
+const getInitialDemoMode = () => {
+  const requestedMode = new URLSearchParams(window.location.search).get('mode')
+  return demoModes.some((mode) => mode.value === requestedMode) ? requestedMode : 'LlmOnly'
+}
 const emptyCustomer = { customerId: '', name: '', country: 'US', verificationStatus: 'Pending' }
 
 const createWelcomeMessage = () => ({
@@ -28,7 +32,7 @@ function App() {
   const [message, setMessage] = useState('')
   const [demoUsers, setDemoUsers] = useState([])
   const [userId, setUserId] = useState('')
-  const [demoMode, setDemoMode] = useState(() => sessionStorage.getItem('demoCapabilityMode') || 'FullAgent')
+  const [demoMode, setDemoMode] = useState(getInitialDemoMode)
   const [isSending, setIsSending] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isHistoryLoading, setIsHistoryLoading] = useState(true)
@@ -44,6 +48,10 @@ function App() {
   const [isCustomerFormOpen, setIsCustomerFormOpen] = useState(false)
   const [customerStatus, setCustomerStatus] = useState('')
   const [newCustomer, setNewCustomer] = useState(emptyCustomer)
+  const [isPolicyOpen, setIsPolicyOpen] = useState(false)
+  const [isPolicyLoading, setIsPolicyLoading] = useState(false)
+  const [policyContent, setPolicyContent] = useState('')
+  const [policyStatus, setPolicyStatus] = useState('')
   const conversationEndRef = useRef(null)
   const promptHistoryIndexRef = useRef(null)
   const promptDraftRef = useRef('')
@@ -70,6 +78,12 @@ function App() {
   useEffect(() => {
     conversationEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [messages, isSending])
+
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    url.searchParams.set('mode', demoMode)
+    window.history.replaceState({}, '', url)
+  }, [demoMode])
 
   useEffect(() => {
     if (!userId || !activeUser) return undefined
@@ -117,7 +131,6 @@ function App() {
   function changeDemoMode(nextMode) {
     const selected = demoModes.find((mode) => mode.value === nextMode) || demoModes[3]
     setDemoMode(selected.value)
-    sessionStorage.setItem('demoCapabilityMode', selected.value)
     setMessages((current) => [
       ...current,
       { role: 'mode-change', text: `Demo mode changed: ${selected.label}`, timestamp: currentTime() },
@@ -136,6 +149,44 @@ function App() {
       setRefreshStatus(error.message || 'Unable to refresh the knowledge base.')
     } finally {
       setIsRefreshing(false)
+    }
+  }
+
+  async function loadPolicy() {
+    setIsPolicyOpen(true)
+    setIsPolicyLoading(true)
+    setPolicyStatus('Loading policy…')
+    try {
+      const response = await fetch('/api/knowledge/policy')
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.detail || payload.message || 'Unable to load policy.')
+      setPolicyContent(payload.content)
+      setPolicyStatus('')
+    } catch (error) {
+      setPolicyStatus(error.message || 'Unable to load policy.')
+    } finally {
+      setIsPolicyLoading(false)
+    }
+  }
+
+  async function savePolicy(event) {
+    event.preventDefault()
+    setIsPolicyLoading(true)
+    setPolicyStatus('Saving policy…')
+    try {
+      const response = await fetch('/api/knowledge/policy', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: policyContent }),
+      })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.detail || payload.message || 'Unable to save policy.')
+      setPolicyStatus(payload.message)
+      setRefreshStatus(payload.message)
+    } catch (error) {
+      setPolicyStatus(error.message || 'Unable to save policy.')
+    } finally {
+      setIsPolicyLoading(false)
     }
   }
 
@@ -444,6 +495,9 @@ function App() {
           <button className="refresh-button" type="button" onClick={loadCustomers} disabled={isSending}>
             <span>☷</span> Manage customers
           </button>
+          <button className="refresh-button" type="button" onClick={loadPolicy} disabled={isSending}>
+            <span>✎</span> Edit policy
+          </button>
           <button className="refresh-button" type="button" onClick={refreshKnowledge} disabled={isRefreshing}>
             <span>↻</span> {isRefreshing ? 'Refreshing…' : 'Refresh knowledge'}
           </button>
@@ -670,6 +724,37 @@ function App() {
             <div className="modal-actions">
               <button type="button" className="done-button" onClick={() => setIsCustomerOpen(false)}>Done</button>
             </div>
+          </section>
+        </div>
+      )}
+
+      {isPolicyOpen && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setIsPolicyOpen(false)}>
+          <section className="policy-modal" role="dialog" aria-modal="true" aria-labelledby="policy-title" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="modal-heading">
+              <div>
+                <span>RAG knowledge source</span>
+                <h2 id="policy-title">Edit ordering policy</h2>
+              </div>
+              <button type="button" aria-label="Close policy editor" onClick={() => setIsPolicyOpen(false)}>×</button>
+            </div>
+            <p>Edit and save the Markdown policy, then click Refresh knowledge when you want the agent to use it.</p>
+            <form className="policy-editor" onSubmit={savePolicy}>
+              <textarea
+                aria-label="Ordering policy Markdown"
+                value={policyContent}
+                onChange={(event) => setPolicyContent(event.target.value)}
+                disabled={isPolicyLoading}
+                spellCheck="true"
+              />
+              {policyStatus && <p className="access-status">{policyStatus}</p>}
+              <div className="modal-actions">
+                <button type="button" onClick={() => setIsPolicyOpen(false)}>Cancel</button>
+                <button type="submit" className="done-button" disabled={isPolicyLoading || !policyContent.trim()}>
+                  {isPolicyLoading ? 'Saving…' : 'Save policy'}
+                </button>
+              </div>
+            </form>
           </section>
         </div>
       )}

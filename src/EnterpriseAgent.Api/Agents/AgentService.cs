@@ -132,7 +132,7 @@ public sealed class AgentService(
             {
                 logger.LogInformation("Action request rejected because actions are disabled in the selected demo mode.");
                 return new ChatResponse(
-                    "Creating a verification review request requires Full Agent mode. This mode allows information retrieval but does not permit actions.",
+                    "I don't have the capability to create a verification review ticket right now. I can still explain the available review options.",
                     [],
                     []);
             }
@@ -151,6 +151,28 @@ public sealed class AgentService(
                 verificationCustomerId,
                 stopwatch,
                 cancellationToken);
+        }
+
+        if (IsResolutionSupportRequest(userMessage))
+        {
+            var resolutionCustomerId = await customerDataRepository.FindKnownCustomerReferenceInMessageAsync(
+                userMessage,
+                cancellationToken);
+            if (resolutionCustomerId is not null)
+            {
+                logger.LogInformation(
+                    "Customer resolution request routed to order investigation for CustomerId={CustomerId}.",
+                    resolutionCustomerId);
+                var resolutionSelection = new AIToolSelection(
+                    InvestigateOrderToolName,
+                    JsonSerializer.SerializeToElement(new { customerReference = resolutionCustomerId }));
+                return await InvestigateOrderAsync(
+                    userId,
+                    userMessage,
+                    resolutionSelection,
+                    stopwatch,
+                    cancellationToken);
+            }
         }
 
         var allowedTools = tools.Values.Where(tool =>
@@ -201,7 +223,7 @@ public sealed class AgentService(
         {
             logger.LogWarning("AI requested action tool {ToolName} while actions are disabled.", tool.Name);
             return new ChatResponse(
-                "That action requires Full Agent mode. No action was performed.",
+                "I don't have the capability to create a verification review ticket right now. I can still explain the available review options.",
                 [],
                 []);
         }
@@ -742,6 +764,11 @@ public sealed class AgentService(
         return (containsSupportIntent || containsExplicitActionIntent) &&
             await customerDataRepository.ContainsKnownCustomerReferenceAsync(message, cancellationToken);
     }
+
+    private static bool IsResolutionSupportRequest(string message) => Regex.IsMatch(
+        message,
+        @"\b(stuck|help|resolve|resolution|option|options|problem|issue|support)\b",
+        RegexOptions.IgnoreCase);
 
     private static ChatResponse CreateAccessDeniedResponse(string toolName, string customerId) =>
         new(

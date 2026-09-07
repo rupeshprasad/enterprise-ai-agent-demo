@@ -60,17 +60,25 @@ public sealed class CustomerDataRepository(
 
     public async Task<bool> ContainsKnownCustomerReferenceAsync(
         string message,
+        CancellationToken cancellationToken) =>
+        await FindKnownCustomerReferenceInMessageAsync(message, cancellationToken) is not null;
+
+    public async Task<string?> FindKnownCustomerReferenceInMessageAsync(
+        string message,
         CancellationToken cancellationToken)
     {
         var filePath = Path.Combine(dataPath, "enterprise-data.json");
         var json = await File.ReadAllTextAsync(filePath, cancellationToken);
         var data = JsonSerializer.Deserialize<EnterpriseData>(json, JsonOptions)
             ?? throw new JsonException("Enterprise data is empty.");
-        return data.CustomerMaster.Any(customer =>
-            System.Text.RegularExpressions.Regex.IsMatch(
-                message,
-                $@"\b(?:{System.Text.RegularExpressions.Regex.Escape(customer.CustomerId)}|{System.Text.RegularExpressions.Regex.Escape(customer.Name)})\b",
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+        var match = data.CustomerMaster
+            .OrderByDescending(customer => customer.Name.Length)
+            .FirstOrDefault(customer =>
+                System.Text.RegularExpressions.Regex.IsMatch(
+                    message,
+                    $@"\b(?:{System.Text.RegularExpressions.Regex.Escape(customer.CustomerId)}|{System.Text.RegularExpressions.Regex.Escape(customer.Name)})\b",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+        return match?.CustomerId;
     }
 
     private async Task<T?> FindAsync<T>(
