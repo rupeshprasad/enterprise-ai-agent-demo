@@ -3,6 +3,7 @@ using EnterpriseAgent.Api.Agents;
 using EnterpriseAgent.Api.AI;
 using EnterpriseAgent.Api.Models;
 using EnterpriseAgent.Api.Rag;
+using EnterpriseAgent.Api.Services;
 using EnterpriseAgent.Api.Security;
 using EnterpriseAgent.Api.Tools;
 using Microsoft.AspNetCore.Hosting;
@@ -94,6 +95,36 @@ public sealed class CapabilityModeTests
         Assert.Contains("Actions: enabled", response.Activity!);
     }
 
+    [Theory]
+    [InlineData("Can you create a submit request for Jordan?")]
+    [InlineData("Please open a ticket for Jordan.")]
+    [InlineData("Raise a review request on behalf of Jordan.")]
+    public async Task FullAgent_NaturalActionPhrases_CreateReviewTicket(string message)
+    {
+        var fixture = CreateFixture();
+
+        var response = await fixture.Agent.SendAsync(
+            "demo-user", message, DemoCapabilityMode.FullAgent, CancellationToken.None);
+
+        Assert.Equal(1, fixture.Tools.Single(tool => tool.Name == "CreateVerificationReviewRequest").ExecutionCount);
+        Assert.Contains("created successfully", response.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Ticket number: VR-TEST", response.Answer);
+    }
+
+    [Fact]
+    public async Task FullAgent_ResolutionRequest_InstructsAiToOfferReviewWithoutCreatingIt()
+    {
+        var fixture = CreateFixture();
+
+        await fixture.Agent.SendAsync(
+            "demo-user", "Help resolve Jordan Lee so they can place an order.", DemoCapabilityMode.FullAgent, CancellationToken.None);
+
+        Assert.Equal(0, fixture.Tools.Single(tool => tool.Name == "CreateVerificationReviewRequest").ExecutionCount);
+        Assert.Contains("Offer to create the ticket", fixture.Ai.LastSendPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("customer-service contact information", fixture.Ai.LastSendPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("bold markers", fixture.Ai.LastSendPrompt, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public async Task NumericCustomerStatusQuestion_UsesVerificationToolDeterministically()
     {
@@ -113,7 +144,7 @@ public sealed class CapabilityModeTests
         var fixture = CreateFixture();
 
         await fixture.Agent.SendAsync(
-            "demo-user", "What is the status of User_004?", DemoCapabilityMode.FullAgent, CancellationToken.None);
+            "demo-user", "What is the status of Aisha Patel?", DemoCapabilityMode.FullAgent, CancellationToken.None);
 
         Assert.Equal(0, fixture.Ai.ToolSelectionCalls);
         Assert.Equal(1, fixture.Tools.Single(tool => tool.Name == "GetVerificationStatus").ExecutionCount);
@@ -153,7 +184,10 @@ public sealed class CapabilityModeTests
             new EmbeddingService(ai),
             new VectorStore(),
             NullLogger<RagService>.Instance);
-        var agent = new AgentService(ai, tools, rag, NullLogger<AgentService>.Instance);
+        var repository = new CustomerDataRepository(
+            environment,
+            NullLogger<CustomerDataRepository>.Instance);
+        var agent = new AgentService(ai, tools, rag, repository, NullLogger<AgentService>.Instance);
         return new Fixture(agent, ai, tools);
     }
 
@@ -177,10 +211,12 @@ public sealed class CapabilityModeTests
         public int SendCalls { get; private set; }
         public int ToolSelectionCalls { get; private set; }
         public int EmbeddingCalls { get; private set; }
+        public string LastSendPrompt { get; private set; } = string.Empty;
 
         public Task<string> SendAsync(string prompt, CancellationToken cancellationToken = default)
         {
             SendCalls++;
+            LastSendPrompt = prompt;
             return Task.FromResult("A grounded test response.");
         }
 

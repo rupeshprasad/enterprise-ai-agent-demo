@@ -13,6 +13,15 @@ public sealed class ChatController(
     ChatHistoryService chatHistoryService,
     ILogger<ChatController> logger) : ControllerBase
 {
+    /// <summary>Returns the saved chat history for one support representative.</summary>
+    /// <remarks>
+    /// Histories are isolated by user ID and loaded from the local data/chat-history directory.
+    /// Only representatives currently defined in customerAccess are accepted.
+    /// </remarks>
+    /// <param name="userId">The representative ID defined in enterprise-data.json, for example alex.</param>
+    /// <param name="cancellationToken">Stops the request if the client disconnects.</param>
+    /// <response code="200">The representative's ordered chat-history entries.</response>
+    /// <response code="400">The user ID is not configured.</response>
     [HttpGet("history")]
     [ProducesResponseType<IReadOnlyCollection<ChatHistoryEntry>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ChatResponse>(StatusCodes.Status400BadRequest)]
@@ -28,6 +37,12 @@ public sealed class ChatController(
         return Ok(await chatHistoryService.GetAsync(userId, cancellationToken));
     }
 
+    /// <summary>Clears the saved chat history for one support representative.</summary>
+    /// <remarks>Removes only the selected representative's conversation; other users' histories are unchanged.</remarks>
+    /// <param name="userId">The representative ID whose history should be cleared.</param>
+    /// <param name="cancellationToken">Stops the request if the client disconnects.</param>
+    /// <response code="204">The history was cleared successfully.</response>
+    /// <response code="400">The user ID is not configured.</response>
     [HttpDelete("history")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ChatResponse>(StatusCodes.Status400BadRequest)]
@@ -44,6 +59,18 @@ public sealed class ChatController(
         return NoContent();
     }
 
+    /// <summary>Sends a message to the enterprise AI agent.</summary>
+    /// <remarks>
+    /// Executes the selected capability mode, applies the enterprise-scope guard and customer
+    /// authorization, optionally retrieves policy content or invokes tools, and saves both sides of
+    /// the conversation to the requesting representative's history. Action tools are available only
+    /// in Full Agent mode and require an explicit action request.
+    /// </remarks>
+    /// <param name="request">The representative ID, message, and requested demonstration capability mode.</param>
+    /// <param name="cancellationToken">Stops the request if the client disconnects.</param>
+    /// <response code="200">The grounded agent answer with optional tool traces, policy sources, and activity.</response>
+    /// <response code="400">The request is invalid or the representative is unknown.</response>
+    /// <response code="503">Gemini is missing configuration or is temporarily unavailable.</response>
     [HttpPost]
     [ProducesResponseType<ChatResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]

@@ -14,6 +14,7 @@ public sealed class AgentService(
     IAIClient aiClient,
     IEnumerable<ICustomerTool> customerTools,
     RagService ragService,
+    CustomerDataRepository customerDataRepository,
     ILogger<AgentService> logger)
 {
     private const string PolicySearchToolName = "SearchPolicy";
@@ -32,7 +33,8 @@ public sealed class AgentService(
         meaning, or what customers are allowed to do. Do not answer general knowledge,
         programming, system administration, or other non-enterprise questions.
         Use InvestigateOrderEligibility
-        when the user asks whether or why a specific customer can or cannot place an order.
+        when the user asks whether or why a specific customer can or cannot place an order,
+        or asks how to help or resolve a stuck customer's ordering or verification problem.
         Use CreateVerificationReviewRequest only when the user explicitly asks to create
         a verification review request. Never claim an action succeeded without its tool result.
         """;
@@ -92,7 +94,7 @@ public sealed class AgentService(
             userMessage.Length,
             tools.Count);
 
-        if (!IsEnterpriseSupportQuestion(userMessage))
+        if (!await IsEnterpriseSupportQuestionAsync(userMessage, cancellationToken))
         {
             logger.LogWarning(
                 "Chat request rejected by enterprise scope guard. MessageLength={MessageLength}.",
@@ -280,7 +282,7 @@ public sealed class AgentService(
                 $"Source: {result.Chunk.Source}\nSection: {result.Chunk.Section}\n{result.Chunk.Content}"));
         var answer = await aiClient.SendAsync(
             $$"""
-            Answer using only the internal policy context below. Cite the policy filename and section.
+            Answer using only the internal policy context below. Wrap every policy-derived statement using **bold markers** in the chat response. Cite the policy filename and section.
             Customer-specific tools are disabled, so never claim to know a named customer's current
             status or eligibility. If the question asks about a named customer, explain the applicable
             policy and clearly state that the customer's actual status is unavailable in this mode.
@@ -345,7 +347,7 @@ public sealed class AgentService(
                 customerReference = new
                 {
                     type = "string",
-                    description = "An exact customer ID or exact customer name, such as 004 or User_004."
+                    description = "An exact customer ID or exact customer name, such as 004 or Aisha Patel."
                 }
             },
             required = new[] { "customerReference" }
@@ -381,7 +383,7 @@ public sealed class AgentService(
             customerReference = new
             {
                 type = "string",
-                description = "An exact customer ID or exact customer name, such as 004 or User_004."
+                description = "An exact customer ID or exact customer name, such as 004 or Aisha Patel."
             }
         },
         required = new[] { "customerReference" }
@@ -414,6 +416,7 @@ public sealed class AgentService(
         var answer = await aiClient.SendAsync(
             $$"""
             Answer the user's question using only the retrieved internal policy context.
+            Wrap every policy-derived statement using **bold markers** in the chat response.
             Cite the policy filename and section in the answer. If the context does not
             answer the question, say that the information is unavailable.
 
@@ -503,8 +506,8 @@ public sealed class AgentService(
         }
 
         var verification = (VerificationRecord)toolResults["GetVerificationStatus"]!;
-        var policyQuery = $"{verification.VerificationStatus} verification customer ordering policy";
-        var policyResults = await ragService.SearchAsync(policyQuery, 2, cancellationToken);
+        var policyQuery = $"{verification.VerificationStatus} verification customer ordering eligibility resolution review request customer service";
+        var policyResults = await ragService.SearchAsync(policyQuery, 4, cancellationToken);
         var policyContext = string.Join(
             "\n\n",
             policyResults.Select(result =>
@@ -515,7 +518,13 @@ public sealed class AgentService(
             Determine the customer's current ordering eligibility using only the approved customer
             and verification results plus the retrieved policy below. Explain the verification status
             and the applicable policy. The retrieved policy is authoritative for current ordering
-            permission and limits. Cite the policy filename and section. Never invent missing facts.
+            permission and limits. If the customer cannot place the requested order and the policy
+            provides resolution or support options, clearly explain every relevant option, including
+            customer-service contact information and that a representative can use this agent to
+            create a verification review ticket. Offer to create the ticket, but do not claim it was
+            created and do not create it unless the user explicitly asks for that action. Cite the
+            policy filename and section. Wrap every policy-derived statement using **bold markers**
+            in the chat response. Never invent missing facts.
 
             User question: {{userMessage}}
             Customer tool results: {{structuredData}}
@@ -588,8 +597,14 @@ public sealed class AgentService(
             tool.Name,
             request.RequestId,
             stopwatch.ElapsedMilliseconds);
+        var customer = await customerDataRepository.GetCustomerAsync(
+            request.CustomerId,
+            cancellationToken);
+        var customerDisplay = customer is null
+            ? $"Customer ID: {request.CustomerId}"
+            : $"{customer.Name} (Customer ID: {request.CustomerId})";
         return new ChatResponse(
-            $"Verification review request {request.RequestId} has been created for customer {request.CustomerId}.",
+            $"The verification review ticket was created successfully. Ticket number: {request.RequestId}. Customer: {customerDisplay}.",
             [trace]);
     }
 
@@ -629,20 +644,30 @@ public sealed class AgentService(
             return new ChatResponse($"Customer {customerId} was not found.", [trace]);
         }
 
+        var customer = await customerDataRepository.GetCustomerAsync(
+            verification.CustomerId,
+            cancellationToken);
+        var customerDisplay = customer is null
+            ? $"Customer ID: {verification.CustomerId}"
+            : $"{customer.Name} (Customer ID: {verification.CustomerId})";
+
         logger.LogInformation(
             "Verification lookup completed for CustomerId={CustomerId} in {ElapsedMilliseconds} ms.",
             customerId,
             stopwatch.ElapsedMilliseconds);
         return new ChatResponse(
-            $"Customer {verification.CustomerId}'s verification status is {verification.VerificationStatus}.",
+            $"{customerDisplay} has a verification status of {verification.VerificationStatus}.",
             [trace]);
     }
 
     private static bool TryReadExplicitReviewRequest(string message, out string customerId)
     {
         customerId = string.Empty;
-        if (!message.Contains("verification review request", StringComparison.OrdinalIgnoreCase) ||
-            !message.Contains("create", StringComparison.OrdinalIgnoreCase))
+        var hasExplicitActionIntent = Regex.IsMatch(
+            message,
+            @"\b(create|submit|open|raise|file)\b.*\b(request|ticket)\b",
+            RegexOptions.IgnoreCase);
+        if (!hasExplicitActionIntent)
         {
             return false;
         }
@@ -679,12 +704,14 @@ public sealed class AgentService(
     {
         var match = Regex.Match(
             message,
-            @"(?:status\s+(?:of|for)|request\s+for|customer)\s+(?<reference>[A-Za-z0-9][A-Za-z0-9 _-]*?)\s*[?.!]*$",
+            @"(?:status\s+(?:of|for)|(?:request|ticket)\s+(?:for|on\s+behalf\s+of)|customer)\s+(?<reference>[A-Za-z0-9][A-Za-z0-9 _-]*?)\s*[?.!]*$",
             RegexOptions.IgnoreCase);
         return match.Success ? match.Groups["reference"].Value.Trim() : null;
     }
 
-    private static bool IsEnterpriseSupportQuestion(string message)
+    private async Task<bool> IsEnterpriseSupportQuestionAsync(
+        string message,
+        CancellationToken cancellationToken)
     {
         var containsExplicitlyUnsupportedTopic = Regex.IsMatch(
             message,
@@ -694,7 +721,26 @@ public sealed class AgentService(
             message,
             @"\b(customer|verification|verify|verified|kyc|order|ordering|eligib(?:le|ility)|policy|review request|access|status)\b|\buser[_-]?\d+\b",
             RegexOptions.IgnoreCase);
-        return containsEnterpriseTopic && !containsExplicitlyUnsupportedTopic;
+        if (containsExplicitlyUnsupportedTopic)
+        {
+            return false;
+        }
+
+        if (containsEnterpriseTopic)
+        {
+            return true;
+        }
+
+        var containsSupportIntent = Regex.IsMatch(
+            message,
+            @"\b(stuck|help|resolve|resolution|option|options|problem|issue|support)\b",
+            RegexOptions.IgnoreCase);
+        var containsExplicitActionIntent = Regex.IsMatch(
+            message,
+            @"\b(create|submit|open|raise|file)\b.*\b(request|ticket)\b",
+            RegexOptions.IgnoreCase);
+        return (containsSupportIntent || containsExplicitActionIntent) &&
+            await customerDataRepository.ContainsKnownCustomerReferenceAsync(message, cancellationToken);
     }
 
     private static ChatResponse CreateAccessDeniedResponse(string toolName, string customerId) =>

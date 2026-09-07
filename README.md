@@ -68,9 +68,9 @@ The frontend proxies `/api` requests to `http://localhost:5187`.
 ## Suggested demo flow
 
 1. Compare the same policy question across the four capability modes.
-2. Ask `What is the verification status of 001?` as `demo-user`.
+2. Ask `What is the verification status of Jordan Lee?` as Alex Morgan.
 3. Ask `Can customer 002 place an order?`
-4. Switch to `restricted-user` and try to access an unassigned customer.
+4. Switch to Priya Shah (restricted access) and try to access an unassigned customer.
 5. Use **Manage access** to assign that customer, then repeat the question without restarting the application.
 6. Use **Manage customers** to add or edit a customer and observe the persisted JSON data.
 7. Change `data/policies/customer-ordering-policy.md`, click **Refresh Knowledge Base**, and ask the policy question again.

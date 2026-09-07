@@ -46,6 +46,10 @@ builder.Services.AddSwaggerGen(options =>
         Version = "v1",
         Description = "Enterprise AI Agent demonstration API for the FDP session."
     });
+    var xmlDocumentationPath = Path.Combine(
+        AppContext.BaseDirectory,
+        $"{typeof(Program).Assembly.GetName().Name}.xml");
+    options.IncludeXmlComments(xmlDocumentationPath);
 });
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
     policy.WithOrigins("http://localhost:5173").AllowAnyHeader().AllowAnyMethod()));

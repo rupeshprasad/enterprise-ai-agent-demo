@@ -58,6 +58,21 @@ public sealed class CustomerDataRepository(
         return nameMatches.SingleOrDefault()?.CustomerId;
     }
 
+    public async Task<bool> ContainsKnownCustomerReferenceAsync(
+        string message,
+        CancellationToken cancellationToken)
+    {
+        var filePath = Path.Combine(dataPath, "enterprise-data.json");
+        var json = await File.ReadAllTextAsync(filePath, cancellationToken);
+        var data = JsonSerializer.Deserialize<EnterpriseData>(json, JsonOptions)
+            ?? throw new JsonException("Enterprise data is empty.");
+        return data.CustomerMaster.Any(customer =>
+            System.Text.RegularExpressions.Regex.IsMatch(
+                message,
+                $@"\b(?:{System.Text.RegularExpressions.Regex.Escape(customer.CustomerId)}|{System.Text.RegularExpressions.Regex.Escape(customer.Name)})\b",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+    }
+
     private async Task<T?> FindAsync<T>(
         string customerId,
         Func<EnterpriseData, IReadOnlyCollection<T>> collectionSelector,

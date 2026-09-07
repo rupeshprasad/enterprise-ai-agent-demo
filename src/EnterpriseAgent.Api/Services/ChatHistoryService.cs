@@ -1,20 +1,15 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using EnterpriseAgent.Api.Models;
+using EnterpriseAgent.Api.Security;
 
 namespace EnterpriseAgent.Api.Services;
 
 public sealed class ChatHistoryService(
     IWebHostEnvironment environment,
+    AuthorizationService authorizationService,
     ILogger<ChatHistoryService> logger)
 {
-    private static readonly IReadOnlyDictionary<string, string> UserFiles =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["demo-user"] = "demo-user.json",
-            ["restricted-user"] = "restricted-user.json"
-        };
-
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true
@@ -25,7 +20,7 @@ public sealed class ChatHistoryService(
     private readonly string historyDirectory = Path.GetFullPath(
         Path.Combine(environment.ContentRootPath, "..", "..", "data", "chat-history"));
 
-    public bool IsSupportedUser(string userId) => UserFiles.ContainsKey(userId);
+    public bool IsSupportedUser(string userId) => authorizationService.IsKnownUser(userId);
 
     public async Task<IReadOnlyCollection<ChatHistoryEntry>> GetAsync(
         string userId,
@@ -92,12 +87,19 @@ public sealed class ChatHistoryService(
 
     private string GetFilePath(string userId)
     {
-        if (!UserFiles.TryGetValue(userId, out var fileName))
+        if (!IsSupportedUser(userId))
         {
             throw new ArgumentException("Unknown demo user.", nameof(userId));
         }
 
-        return Path.Combine(historyDirectory, fileName);
+        var safeUserId = string.Concat(userId.Where(character =>
+            char.IsLetterOrDigit(character) || character is '.' or '_' or '-'));
+        if (!string.Equals(safeUserId, userId, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Invalid demo user ID.", nameof(userId));
+        }
+
+        return Path.Combine(historyDirectory, $"{safeUserId}.json");
     }
 
     private SemaphoreSlim GetLock(string userId) =>

@@ -3,6 +3,11 @@ import './App.css'
 
 const currentTime = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 const formatTime = (timestamp) => new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+const renderBoldText = (text) => text.split(/(\*\*[^*]+\*\*)/g).map((part, index) =>
+  part.startsWith('**') && part.endsWith('**')
+    ? <strong key={`${part}-${index}`}>{part.slice(2, -2)}</strong>
+    : part
+)
 
 const demoModes = [
   { value: 'LlmOnly', label: 'LLM Only', rag: false, readTools: false, actions: false },
@@ -21,7 +26,8 @@ const createWelcomeMessage = () => ({
 function App() {
   const [messages, setMessages] = useState(() => [createWelcomeMessage()])
   const [message, setMessage] = useState('')
-  const [userId, setUserId] = useState('demo-user')
+  const [demoUsers, setDemoUsers] = useState([])
+  const [userId, setUserId] = useState('')
   const [demoMode, setDemoMode] = useState(() => sessionStorage.getItem('demoCapabilityMode') || 'FullAgent')
   const [isSending, setIsSending] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -39,13 +45,36 @@ function App() {
   const [customerStatus, setCustomerStatus] = useState('')
   const [newCustomer, setNewCustomer] = useState(emptyCustomer)
   const conversationEndRef = useRef(null)
+  const promptHistoryIndexRef = useRef(null)
+  const promptDraftRef = useRef('')
   const activeMode = demoModes.find((mode) => mode.value === demoMode) || demoModes[3]
+  const activeUser = demoUsers.find((user) => user.userId === userId)
+
+  useEffect(() => {
+    async function loadUsers() {
+      try {
+        const response = await fetch('/api/access/users')
+        const payload = await response.json()
+        if (!response.ok) throw new Error(payload.message || 'Unable to load support representatives.')
+        setDemoUsers(payload)
+        setUserId((current) => payload.some((user) => user.userId === current) ? current : (payload[0]?.userId || ''))
+      } catch (error) {
+        setMessages([createWelcomeMessage(), { role: 'error', text: error.message, timestamp: currentTime() }])
+        setIsHistoryLoading(false)
+      }
+    }
+
+    loadUsers()
+  }, [])
 
   useEffect(() => {
     conversationEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [messages, isSending])
 
   useEffect(() => {
+    if (!userId || !activeUser) return undefined
+    promptHistoryIndexRef.current = null
+    promptDraftRef.current = ''
     let ignoreResult = false
 
     async function loadHistory() {
@@ -57,7 +86,7 @@ function App() {
 
         const history = payload.map((item) => ({
           ...item,
-          userName: item.role === 'user' ? userId : undefined,
+          userName: item.role === 'user' ? activeUser.displayName : undefined,
           timestamp: formatTime(item.timestamp),
           toolCalls: item.toolCalls || [],
           sources: item.sources || [],
@@ -83,7 +112,7 @@ function App() {
     return () => {
       ignoreResult = true
     }
-  }, [userId])
+  }, [userId, activeUser])
 
   function changeDemoMode(nextMode) {
     const selected = demoModes.find((mode) => mode.value === nextMode) || demoModes[3]
@@ -138,7 +167,7 @@ function App() {
       const payload = await response.json()
       if (!response.ok) throw new Error(payload.message || 'Unable to update customer access.')
       setAccessOptions(payload)
-      setAccessStatus(`Access updated for ${userId}.`)
+      setAccessStatus(`Access updated for ${activeUser.displayName}.`)
     } catch (error) {
       setAccessStatus(error.message || 'Unable to update customer access.')
     } finally {
@@ -149,7 +178,7 @@ function App() {
   async function removeAllAccess() {
     const assigned = accessOptions.filter((customer) => customer.hasAccess)
     if (assigned.length === 0) {
-      setAccessStatus(`${userId} already has no customer access.`)
+      setAccessStatus(`${activeUser.displayName} already has no customer access.`)
       return
     }
 
@@ -165,7 +194,7 @@ function App() {
         if (!response.ok) throw new Error('Unable to remove all customer access.')
       }
       setAccessOptions((current) => current.map((customer) => ({ ...customer, hasAccess: false })))
-      setAccessStatus(`${userId} now has no customer access.`)
+      setAccessStatus(`${activeUser.displayName} now has no customer access.`)
     } catch (error) {
       setAccessStatus(error.message || 'Unable to remove all customer access.')
     } finally {
@@ -265,6 +294,9 @@ function App() {
       })
       if (!response.ok) throw new Error('Unable to clear chat history.')
       setMessages([createWelcomeMessage()])
+      setMessage('')
+      promptHistoryIndexRef.current = null
+      promptDraftRef.current = ''
       setRefreshStatus('')
     } catch (error) {
       setMessages((current) => [
@@ -281,9 +313,11 @@ function App() {
 
     setMessages((current) => [
       ...current,
-      { role: 'user', userName: userId, text: trimmed, timestamp: currentTime() },
+      { role: 'user', userName: activeUser.displayName, text: trimmed, timestamp: currentTime() },
     ])
     setMessage('')
+    promptHistoryIndexRef.current = null
+    promptDraftRef.current = ''
     setIsSending(true)
 
     try {
@@ -317,6 +351,36 @@ function App() {
       ])
     } finally {
       setIsSending(false)
+    }
+  }
+
+  function navigatePromptHistory(event, direction) {
+    const questions = messages
+      .filter((item) => item.role === 'user')
+      .map((item) => item.text)
+    if (questions.length === 0) return
+
+    const currentIndex = promptHistoryIndexRef.current
+    if (direction < 0) {
+      if (currentIndex === null) {
+        promptDraftRef.current = message
+        promptHistoryIndexRef.current = questions.length - 1
+      } else {
+        promptHistoryIndexRef.current = Math.max(0, currentIndex - 1)
+      }
+      event.preventDefault()
+      setMessage(questions[promptHistoryIndexRef.current])
+      return
+    }
+
+    if (currentIndex === null) return
+    event.preventDefault()
+    if (currentIndex < questions.length - 1) {
+      promptHistoryIndexRef.current = currentIndex + 1
+      setMessage(questions[promptHistoryIndexRef.current])
+    } else {
+      promptHistoryIndexRef.current = null
+      setMessage(promptDraftRef.current)
     }
   }
 
@@ -368,10 +432,11 @@ function App() {
         </div>
 
         <div className="sidebar-settings">
-          <label htmlFor="demo-user">Demo user</label>
-          <select id="demo-user" value={userId} onChange={(event) => { setUserId(event.target.value); setIsAccessOpen(false) }} disabled={isSending}>
-            <option value="demo-user">demo-user</option>
-            <option value="restricted-user">restricted-user</option>
+          <label htmlFor="demo-user">Support representative</label>
+          <select id="demo-user" value={userId} onChange={(event) => { setUserId(event.target.value); setIsAccessOpen(false) }} disabled={isSending || demoUsers.length === 0}>
+            {demoUsers.map((user) => (
+              <option key={user.userId} value={user.userId}>{user.displayName}</option>
+            ))}
           </select>
           <button className="refresh-button" type="button" onClick={loadAccess} disabled={isSending}>
             <span>⚿</span> Manage access
@@ -410,9 +475,9 @@ function App() {
                     <strong>{item.role === 'user' ? item.userName : item.role === 'error' ? 'Error' : 'Enterprise Agent'}</strong>
                     <time>{item.timestamp}</time>
                   </div>
-                  <p>{item.text}</p>
+                  <p>{item.role === 'assistant' ? renderBoldText(item.text) : item.text}</p>
                   {item.activity?.length > 0 && (
-                    <details className="agent-activity" open>
+                    <details className="agent-activity">
                       <summary>Activity trace · {item.demoMode || 'Full Agent'}</summary>
                       <ul className="activity-list">
                         {item.activity.map((entry, activityIndex) => <li key={`${entry}-${activityIndex}`}>{entry}</li>)}
@@ -475,8 +540,20 @@ function App() {
               id="message"
               aria-label="Message"
               value={message}
-              onChange={(event) => setMessage(event.target.value)}
+              onChange={(event) => {
+                setMessage(event.target.value)
+                promptHistoryIndexRef.current = null
+                promptDraftRef.current = event.target.value
+              }}
               onKeyDown={(event) => {
+                if (event.key === 'ArrowUp') {
+                  navigatePromptHistory(event, -1)
+                  return
+                }
+                if (event.key === 'ArrowDown') {
+                  navigatePromptHistory(event, 1)
+                  return
+                }
                 if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault()
                   event.currentTarget.form?.requestSubmit()
@@ -489,7 +566,7 @@ function App() {
               ↑
             </button>
           </div>
-          <small>Enter to send · Shift+Enter for a new line</small>
+          <small>Enter to send · Shift+Enter for a new line · ↑/↓ previous questions</small>
         </form>
       </main>
 
@@ -499,24 +576,34 @@ function App() {
             <div className="modal-heading">
               <div>
                 <span>Demo authorization</span>
-                <h2 id="access-title">Customer access for {userId}</h2>
+                <h2 id="access-title">Customer access for {activeUser?.displayName}</h2>
               </div>
               <button type="button" aria-label="Close access dialog" onClick={() => setIsAccessOpen(false)}>×</button>
             </div>
             <p>Changes take effect on the next agent request—no API restart is required.</p>
-            <div className="access-list">
-              {accessOptions.map((customer) => (
-                <label key={customer.customerId}>
-                  <span><strong>{customer.customerId}</strong><small>{customer.customerName}</small></span>
-                  <input
-                    type="checkbox"
-                    checked={customer.hasAccess}
-                    onChange={(event) => updateAccess(customer.customerId, event.target.checked)}
-                    disabled={isAccessLoading}
-                  />
-                </label>
-              ))}
-              {isAccessLoading && accessOptions.length === 0 && <small>Loading customer directory…</small>}
+            <div className="customer-table-wrap access-table-wrap">
+              <table className="customer-table access-table">
+                <thead><tr><th>ID</th><th>Name</th><th>Verification</th><th>Access</th></tr></thead>
+                <tbody>
+                  {accessOptions.map((customer) => (
+                    <tr key={customer.customerId}>
+                      <td><strong>{customer.customerId}</strong></td>
+                      <td>{customer.customerName}</td>
+                      <td>{customer.verificationStatus}</td>
+                      <td className="access-column">
+                        <input
+                          type="checkbox"
+                          aria-label={`Allow access to ${customer.customerName}`}
+                          checked={customer.hasAccess}
+                          onChange={(event) => updateAccess(customer.customerId, event.target.checked)}
+                          disabled={isAccessLoading}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {isAccessLoading && accessOptions.length === 0 && <small className="table-loading">Loading customer directory…</small>}
             </div>
             {accessStatus && <p className="access-status">{accessStatus}</p>}
             <div className="modal-actions">

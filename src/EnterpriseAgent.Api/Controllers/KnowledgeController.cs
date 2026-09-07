@@ -11,6 +11,13 @@ public sealed class KnowledgeController(
     RagService ragService,
     ILogger<KnowledgeController> logger) : ControllerBase
 {
+    /// <summary>Rebuilds the in-memory policy knowledge index.</summary>
+    /// <remarks>
+    /// Reloads Markdown policy documents, creates fresh Gemini embeddings, and replaces the current
+    /// vector index. Call this after changing a policy file; an API restart is not required.
+    /// </remarks>
+    /// <response code="200">The knowledge index was refreshed and the indexed chunk count is returned.</response>
+    /// <response code="503">Embedding configuration is invalid or the provider is unavailable.</response>
     [HttpPost("refresh")]
     [ProducesResponseType<KnowledgeRefreshResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<KnowledgeRefreshResponse>(StatusCodes.Status503ServiceUnavailable)]

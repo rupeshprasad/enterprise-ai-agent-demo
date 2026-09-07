@@ -1,57 +1,57 @@
 {
-  "customerMaster": [
-    {
-      "customerId": "001",
-      "name": "User_001",
-      "country": "US"
-    },
-    {
-      "customerId": "002",
-      "name": "User_002",
-      "country": "US"
-    },
-    {
-      "customerId": "003",
-      "name": "User_003",
-      "country": "CA"
-    },
-    {
-      "customerId": "004",
-      "name": "User_004",
-      "country": "US"
-    }
-  ],
-  "customerAccess": [
-    {
-      "userId": "demo-user",
-      "customerIds": [
-        "001",
-        "002"
-      ]
-    },
-    {
-      "userId": "restricted-user",
-      "customerIds": [
-        "004"
-      ]
-    }
-  ],
-  "verification": [
-    {
-      "customerId": "001",
-      "verificationStatus": "Pending"
-    },
-    {
-      "customerId": "003",
-      "verificationStatus": "Rejected"
-    },
-    {
-      "customerId": "004",
-      "verificationStatus": "Pending"
-    },
-    {
-      "customerId": "002",
-      "verificationStatus": "Approved"
-    }
-  ]
+    "customerMaster": [
+        {
+            "customerId": "1",
+            "name": "Jordan",
+            "country": "US"
+        },
+        {
+            "customerId": "2",
+            "name": "Maria",
+            "country": "US"
+        },
+        {
+            "customerId": "3",
+            "name": "David",
+            "country": "CA"
+        },
+        {
+            "customerId": "4",
+            "name": "Aisha",
+            "country": "US"
+        }
+    ],
+    "customerAccess": [
+        {
+            "userId": "alex",
+            "customerIds": [
+                "1",
+                "2"
+            ]
+        },
+        {
+            "userId": "priya",
+            "customerIds": [
+                "4"
+            ]
+        }
+    ],
+    "verification": [
+        {
+            "customerId": "1",
+            "verificationStatus": "Pending"
+        },
+        {
+            "customerId": "3",
+            "verificationStatus": "Rejected"
+        },
+        {
+            "customerId": "4",
+            "verificationStatus": "Pending"
+        },
+        {
+            "customerId": "2",
+            "verificationStatus": "Approved"
+        }
+    ]
 }

@@ -53,18 +53,40 @@ public sealed class AuthorizationService
         return allowed;
     }
 
+    public IReadOnlyCollection<SupportRepresentativeOption> GetSupportRepresentatives() =>
+        ReadEnterpriseData().CustomerAccess
+            .Select(assignment => new SupportRepresentativeOption(
+                assignment.UserId,
+                CreateDisplayName(assignment.UserId)))
+            .OrderBy(user => user.DisplayName)
+            .ToArray();
+
+    public bool IsKnownUser(string userId) =>
+        ReadEnterpriseData().CustomerAccess.Any(assignment =>
+            string.Equals(assignment.UserId, userId, StringComparison.OrdinalIgnoreCase));
+
     public IReadOnlyCollection<CustomerAccessOption> GetCustomerAccess(string userId)
     {
         var data = ReadEnterpriseData();
         var lookup = CreateAccessLookup(data);
         var assigned = lookup.GetValueOrDefault(userId) ?? [];
+        var verificationByCustomer = data.Verification.ToDictionary(
+            verification => verification.CustomerId,
+            verification => verification.VerificationStatus,
+            StringComparer.OrdinalIgnoreCase);
         return data.CustomerMaster
             .Select(customer => new CustomerAccessOption(
                 customer.CustomerId,
                 customer.Name,
+                verificationByCustomer.GetValueOrDefault(customer.CustomerId) ?? "Unknown",
                 assigned.Contains(customer.CustomerId)))
             .ToArray();
     }
+
+    private static string CreateDisplayName(string userId) => string.Join(
+        " ",
+        userId.Split(['.', '_', '-'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => char.ToUpperInvariant(part[0]) + part[1..]));
 
     public async Task<IReadOnlyCollection<CustomerAccessOption>> SetCustomerAccessAsync(
         string userId,

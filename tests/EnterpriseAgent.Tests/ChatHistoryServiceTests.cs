@@ -1,4 +1,6 @@
+using System.Text.Json;
 using EnterpriseAgent.Api.Models;
+using EnterpriseAgent.Api.Security;
 using EnterpriseAgent.Api.Services;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.FileProviders;
@@ -18,31 +20,45 @@ public sealed class ChatHistoryServiceTests : IDisposable
     {
         var contentRoot = Path.Combine(testRoot, "src", "EnterpriseAgent.Api");
         Directory.CreateDirectory(contentRoot);
+        var dataDirectory = Path.Combine(testRoot, "data");
+        Directory.CreateDirectory(dataDirectory);
+        var enterpriseData = new EnterpriseData(
+            [],
+            [new CustomerAccessAssignment("alex", []), new CustomerAccessAssignment("priya", [])],
+            []);
+        File.WriteAllText(
+            Path.Combine(dataDirectory, "enterprise-data.json"),
+            JsonSerializer.Serialize(enterpriseData, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        var environment = new TestEnvironment(contentRoot);
+        var authorization = new AuthorizationService(
+            environment,
+            NullLogger<AuthorizationService>.Instance);
         var service = new ChatHistoryService(
-            new TestEnvironment(contentRoot),
+            environment,
+            authorization,
             NullLogger<ChatHistoryService>.Instance);
 
         await service.AppendAsync(
-            "demo-user",
+            "alex",
             new ChatHistoryEntry("user", "demo message", DateTimeOffset.UtcNow),
             CancellationToken.None);
         await service.AppendAsync(
-            "restricted-user",
+            "priya",
             new ChatHistoryEntry("user", "restricted message", DateTimeOffset.UtcNow),
             CancellationToken.None);
 
-        var demoHistory = await service.GetAsync("demo-user", CancellationToken.None);
-        var restrictedHistory = await service.GetAsync("restricted-user", CancellationToken.None);
+        var demoHistory = await service.GetAsync("alex", CancellationToken.None);
+        var restrictedHistory = await service.GetAsync("priya", CancellationToken.None);
 
         Assert.Single(demoHistory);
         Assert.Equal("demo message", demoHistory.Single().Text);
         Assert.Single(restrictedHistory);
         Assert.Equal("restricted message", restrictedHistory.Single().Text);
 
-        await service.ClearAsync("demo-user", CancellationToken.None);
+        await service.ClearAsync("alex", CancellationToken.None);
 
-        Assert.Empty(await service.GetAsync("demo-user", CancellationToken.None));
-        Assert.Single(await service.GetAsync("restricted-user", CancellationToken.None));
+        Assert.Empty(await service.GetAsync("alex", CancellationToken.None));
+        Assert.Single(await service.GetAsync("priya", CancellationToken.None));
     }
 
     public void Dispose()

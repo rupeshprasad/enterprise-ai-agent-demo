@@ -12,6 +12,45 @@ namespace EnterpriseAgent.Tests;
 public sealed class AgentIntegrationTests
 {
     [Fact]
+    public async Task VerificationStatus_ByCustomerName_ReturnsNameAndId()
+    {
+        using var environment = new TestDataEnvironment();
+        var aiClient = new DeterministicAIClient();
+        var repository = new CustomerDataRepository(
+            environment,
+            NullLogger<CustomerDataRepository>.Instance);
+        var authorization = new AuthorizationService(
+            environment,
+            NullLogger<AuthorizationService>.Instance);
+        ICustomerTool[] tools =
+        [
+            new GetCustomerTool(repository, authorization),
+            new GetVerificationStatusTool(repository, authorization)
+        ];
+        var ragService = new RagService(
+            new DocumentLoader(environment, NullLogger<DocumentLoader>.Instance),
+            new TextChunker(),
+            new EmbeddingService(aiClient),
+            new VectorStore(),
+            NullLogger<RagService>.Instance);
+        var agent = new AgentService(
+            aiClient,
+            tools,
+            ragService,
+            repository,
+            NullLogger<AgentService>.Instance);
+
+        var response = await agent.SendAsync(
+            "demo-user",
+            "What is the status of Acme Manufacturing?",
+            CancellationToken.None);
+
+        Assert.Contains("Acme Manufacturing", response.Answer);
+        Assert.Contains("ABC123", response.Answer);
+        Assert.Contains("Pending", response.Answer);
+    }
+
+    [Fact]
     public async Task OrderInvestigation_CombinesCustomerToolsAndPendingPolicy()
     {
         using var environment = new TestDataEnvironment();
@@ -37,6 +76,7 @@ public sealed class AgentIntegrationTests
             aiClient,
             tools,
             ragService,
+            repository,
             NullLogger<AgentService>.Instance);
 
         var response = await agent.SendAsync(
