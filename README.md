@@ -84,4 +84,4 @@ npm run lint
 npm run build
 ```
 
-Serilog writes console logs and daily rolling files under `C:\logs\EnterpriseAgent.Api`. Secrets and raw prompts are not intentionally logged.
+Serilog writes console logs to file and daily rolling files under `C:\logs\EnterpriseAgent.Api`. Secrets and raw prompts are not intentionally logged.
